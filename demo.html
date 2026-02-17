@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <title>Real-time List Demo</title>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; }
+    h2 { color: #333; }
+    .status { padding: 6px 12px; border-radius: 4px; display: inline-block; font-size: 13px; }
+    .connected { background: #d4edda; color: #155724; }
+    .disconnected { background: #f8d7da; color: #721c24; }
+    .form-row { display: flex; gap: 10px; margin: 20px 0; }
+    input { flex: 1; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; }
+    button { padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #0056b3; }
+    .item-list { border: 1px solid #eee; border-radius: 6px; overflow: hidden; }
+    .item { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+    .item:last-child { border-bottom: none; }
+    .item.new { animation: highlight 2s ease-out; }
+    @keyframes highlight { 0% { background: #fff3cd; } 100% { background: white; } }
+    .item-name { font-weight: bold; }
+    .item-time { font-size: 12px; color: #999; }
+    .log { background: #f8f9fa; border: 1px solid #eee; padding: 12px; border-radius: 6px; font-size: 12px; font-family: monospace; max-height: 150px; overflow-y: auto; }
+  </style>
+</head>
+<body>
+  <h2>📋 Real-time Item List</h2>
+
+  <div>
+    WebSocket: <span id="ws-status" class="status disconnected">Disconnected</span>
+    &nbsp; Items: <strong id="item-count">0</strong>
+  </div>
+
+  <div class="form-row" style="margin-top:20px">
+    <input id="name-input" placeholder="Tên item..." />
+    <input id="content-input" placeholder="Nội dung..." />
+    <button onclick="createItem()">Tạo Item</button>
+    <button onclick="loadList()" style="background:#6c757d">Refresh List</button>
+  </div>
+
+  <div id="item-list" class="item-list">
+    <div class="item" style="color:#999;justify-content:center">Chưa có item nào</div>
+  </div>
+
+  <br>
+  <strong>📡 WebSocket Events:</strong>
+  <div id="log" class="log"></div>
+
+  <script>
+    const API = 'http://localhost:8080/api/v1';
+    const WS_URL = 'ws://localhost:8080/ws';
+    let items = [];
+    let ws;
+
+    // ========== WebSocket Connection ==========
+    function connectWS() {
+      ws = new WebSocket(WS_URL);
+
+      ws.onopen = () => {
+        document.getElementById('ws-status').textContent = 'Connected';
+        document.getElementById('ws-status').className = 'status connected';
+        addLog('✅ WebSocket connected');
+      };
+
+      ws.onclose = () => {
+        document.getElementById('ws-status').textContent = 'Disconnected';
+        document.getElementById('ws-status').className = 'status disconnected';
+        addLog('❌ WebSocket disconnected - reconnecting in 3s...');
+        setTimeout(connectWS, 3000); // auto reconnect
+      };
+
+      ws.onerror = (e) => addLog('⚠️ WebSocket error');
+
+      ws.onmessage = (e) => {
+        const event = JSON.parse(e.data);
+        addLog(`📨 [${event.type}] ${JSON.stringify(event.payload)}`);
+
+        if (event.type === 'ITEM_CREATED') {
+          items.unshift(event.payload);
+          renderList(true); 
+        }
+      };
+    }
+
+    // ========== API Calls ==========
+    async function loadList() {
+      const res = await fetch(`${API}/items?sort_by=created_at&sort_dir=desc&page=1&page_size=20`);
+      const json = await res.json();
+      items = json.data.items || [];
+      renderList(false);
+      addLog(`📋 List loaded: ${items.length} items`);
+    }
+
+    async function createItem() {
+      const name = document.getElementById('name-input').value.trim();
+      const content = document.getElementById('content-input').value.trim();
+      if (!name) { alert('Nhập tên item!'); return; }
+
+      const res = await fetch(`${API}/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, content })
+      });
+      const json = await res.json();
+      addLog(`✅ Created via API: ${json.data.id}`);
+      document.getElementById('name-input').value = '';
+      document.getElementById('content-input').value = '';
+    }
+
+    // ========== Render ==========
+    function renderList(highlightFirst) {
+      document.getElementById('item-count').textContent = items.length;
+      const container = document.getElementById('item-list');
+
+      if (!items || items.length === 0) {
+        container.innerHTML = '<div class="item" style="color:#999;justify-content:center">Chưa có item nào</div>';
+        return;
+      }
+
+      container.innerHTML = items.map((item, i) => `
+        <div class="item ${highlightFirst && i === 0 ? 'new' : ''}">
+          <div>
+            <div class="item-name">${item.name}</div>
+            <div style="font-size:13px;color:#666;margin-top:2px">${item.content || ''}</div>
+          </div>
+          <div class="item-time">${new Date(item.created_at).toLocaleString('vi-VN')}</div>
+        </div>
+      `).join('');
+    }
+
+    function addLog(msg) {
+      const log = document.getElementById('log');
+      const time = new Date().toLocaleTimeString('vi-VN');
+      log.innerHTML = `[${time}] ${msg}\n` + log.innerHTML;
+    }
+
+    connectWS();
+    loadList();
+  </script>
+</body>
+</html>
